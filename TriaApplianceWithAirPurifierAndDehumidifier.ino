@@ -4,16 +4,16 @@
 #include "ssd1306.h"
 
 #include <NeoSWSerial.h>
-#include <AltSoftSerial.h>
+//#include <SoftwareSerial.h>
 #include <string.h>
 
   /*
-   * arduino pin definition digital
+   * arduino pin definition digital digital temperature, humidity sensor
    */
 #define DHTPIN 2
 
   /*
-   * arduino pin definition analog
+   * arduino pin definition analog air quality sensor
    */
 #define MQPIN 0
 
@@ -40,10 +40,41 @@
 /*
  * Tria operation mode L - logic, R - Reinforcement learning, P - Paused
  */
- String opsMode = "R"; //
+ #define LOGICAL 0
+ #define REINFORCE 1
+ #define PAUSE 2
 
- String logLevel = "ERROR"; // "INFO", "WARN", "ERROR"
+/*
+ * logging levels
+ */
+ #define INFO 0
+ #define WARN 1
+ #define ERR 2
 
+/*
+ * sensor types
+ */
+ #define TM 0  // temperature
+ #define HU 1  // humidity
+ #define AQ 2  // air quatity
+/*
+ * Actuator states 
+ */
+ #define OFF 0  // Not active/ energized
+ #define ON 1   // active / energized
+/*
+ * System statuses
+ */
+ #define S_OK 0
+ #define S_FAIL 1
+ 
+
+ /*
+  * global delaration of operation mode and logging level for tria
+  */
+ int opsMode = REINFORCE; // 
+ int logLevel = ERR;      // INFO, WARN, ERR
+ 
   /*
    * sensor High/ Low limit definitions
    */
@@ -73,23 +104,26 @@
    * port definitions for communicating with smart phone devices vis BlueTooth LE
    */
 const int rxPin = 10; //SoftwareSerial RX pin, connect to JY-MCY TX pin
-const int txPin = 11; //SoftwareSerial TX pin, connect to JY-MCU RX pin
+const int txPin = 11; //11; //SoftwareSerial TX pin, connect to JY-MCU RX pin
 
   /*
    * port definitions for communicating with reinforcement learning A2C model
+   * const int rxPinModel = 8;  //SoftwareSerial RX interface to model prediction service
+   * const int txPinModel = 9;  //SoftwareSerial TX interface to model prediction service
+   * 
    */
-const int rxPinModel = 8;  //SoftwareSerial RX interface to model prediction service
-const int txPinModel = 9;  //SoftwareSerial TX interface to model prediction service
 
   /*
    * define Software Serial with android/ios bluetooth
    */
 NeoSWSerial triaSerial(rxPin, txPin); // RX, TX
 
+
  /*
   * define Software Serial with Reinforement Learning A2C model
+  * AltSoftSerial rlSerial(rxPinModel, txPinModel); // RX, TX 
   */
-AltSoftSerial rlSerial(rxPinModel, txPinModel); // RX, TX  
+
 
   /*
    * initialize sensors level shifting to 3.3 volts may be needed
@@ -120,16 +154,17 @@ void setup() {
 
   /*
    * wait few seconds between measurments
+   * rlSerial.begin(9600);
    */
+
   triaSerial.begin(9600);
-  //rlSerial.begin(9600);
+ 
  /*
   * display initialization begin
   */
     ssd1306_128x64_i2c_init();
     ssd1306_fillScreen(0x00);
     ssd1306_setFixedFont(ssd1306xled_font6x8);
-    //updateTriaStatusDisplay(opsMode);
     ssd1306_printFixed (0, 0, "      TRIA Status    ", STYLE_NORMAL);
     ssd1306_drawLine(0,12, 127,12);
     ssd1306_printFixed (0, 16,"T:00.0 [00-00]F      ", STYLE_NORMAL);
@@ -147,7 +182,7 @@ void setup() {
   /*
    * debug message about tria system initialization
    */
-  log("Tria Environment Control System -- Initialization","INFO");
+  log("Tria Environment Control System -- Initialization",INFO);
 
   /*
    * set arduino pin mode
@@ -172,7 +207,7 @@ void setup() {
   digitalWrite(HUMIDIFIERPIN, HIGH);
   digitalWrite(AIRPURIFIERPIN, HIGH);
   digitalWrite(DEHUMIDIFIERPIN, HIGH);
-  updateActuatorDisplay("F","F","F","F","F");
+  updateActuatorDisplay(OFF,OFF,OFF,OFF,OFF);
 
   /*
    * bigin data collection for temp and humidity
@@ -248,16 +283,16 @@ void loop() {
   /*
    * update display values
    */
-    updateSensorDisplay("T",ftemperature,TL,TH);
-    updateSensorDisplay("H",humidity,HL,HH);
-    updateSensorDisplay("A",gsppmc,-1,AH);
+    updateSensorDisplay(TM,ftemperature,TL,TH);
+    updateSensorDisplay(HU,humidity,HL,HH);
+    updateSensorDisplay(AQ,gsppmc,-1,AH);
 
   /*  
    *   send observations to reinforcement model to get predictive action
    */
    String rlMsg = String(ftemperature) + ":" + String(humidity) + ":" + String(gsppmc);
   if (!rlMsg.equals("")) {
-    log("RL Values: " + rlMsg, "INFO");
+    log("RL Values: " + rlMsg, INFO);
     Serial.println(rlMsg);
   }
   rlMsg = "";
@@ -282,7 +317,7 @@ void loop() {
    * check status message code
    */
   if(!statusMsg.equals("")){
-        log("Tria Status: " +statusMsg, "INFO");
+        log("Tria Status: " +statusMsg, INFO);
     triaSerial.print(">" + statusMsg);
   }
   statusMsg="";
@@ -296,8 +331,8 @@ void loop() {
    * check tria message is not null
    */
   if (!triaMsg.equals("")) {
-    log("Tria Values: " + triaMsg, "INFO");
-    triaSerial.print(triaMsg);
+    log("Tria Values: " + triaMsg, INFO);
+    triaSerial.println(triaMsg);
   }
   triaMsg = "";
 
@@ -311,15 +346,15 @@ void loop() {
    */
   if(sendSetting[0] == 1 || sendSetting[1] == 1 || sendSetting[2] == 1){
     if(sendSetting[0]  == 1){
-       log("Tria Settings: " + String(TH) + ':' + String(TL) , "INFO");
+       log("Tria Settings: " + String(TH) + ':' + String(TL) , INFO);
        triaSerial.print("R:T:" + String(TH) + ':' + String(TL));
        sendSetting[0] =0;
     } else if(sendSetting[1]  == 1){
-       log("Tria Settings: " + String(HH) + ':' + String(HL) , "INFO");
+       log("Tria Settings: " + String(HH) + ':' + String(HL) , INFO);
        triaSerial.print("R:H:" + String(HH) + ':' + String(HL));
         sendSetting[1] =0;
     } else if (sendSetting[2]  == 1){
-       log("Tria Settings: " + String(AH) + ':' + String(AL) , "INFO");
+       log("Tria Settings: " + String(AH) + ':' + String(AL) , INFO);
        triaSerial.print("R:A:" + String(AH) + ':' + String(AL));
        sendSetting[2]=0;
     }
@@ -335,7 +370,8 @@ void loop() {
     if (n != 0)
     {
       byte m = triaSerial.readBytesUntil('\n', setbuff, 50);
-      log("Set Property request received: " + String(setbuff), "INFO");
+      //Serial.println("Set Property request received: " + String(setbuff));
+      log("Set Property request received: " + String(setbuff), INFO);
       byte index = 0;
       ptr = strtok(setbuff, ":");
       while(ptr != NULL){
@@ -346,15 +382,15 @@ void loop() {
   /*
    * process change
    */
-      String s = processChange(setparams[0], setparams[1], atof(setparams[2]));
-      if (s.equals("S_OK")){
-        log("Successfully changed the property!", "INFO");
-        log(setparams[1], "INFO");
-        log(" to ", "INFO");
-        log(setparams[2], "INFO");
-        log("Current Property values - TH: " + String(TH) + " TL: "+ String(TL) + " HH: "+ String(HH) + " HL: "+ String(HL) + " AH: "+ String(AH), "INFO");
+      int state = processChange(setparams[0], setparams[1], atof(setparams[2]));
+      if (state == S_OK){
+        log("Successfully changed the property!", INFO);
+        log(setparams[1], INFO);
+        log(" to ", INFO);
+        log(setparams[2], INFO);
+        log("Current Property values - TH: " + String(TH) + " TL: "+ String(TL) + " HH: "+ String(HH) + " HL: "+ String(HL) + " AH: "+ String(AH), INFO);
       }else{
-        log("Invalid change property request received!", "ERROR");
+        log("Invalid change property request received!", ERR);
       }
     }
   }
@@ -375,9 +411,9 @@ void loop() {
    * R - reinforment learning model
    * P - pass put all actuators in off mode
    */
- if (opsMode.equals("L")){ 
+ if (opsMode == LOGICAL){ 
      execLogicActuators(sensorCd);
- } else if (opsMode.equals("R")){
+ } else if (opsMode == REINFORCE){
      execRLActuators(action);
  } else {
      execPauseActuators();
@@ -388,7 +424,7 @@ void loop() {
 /*    ProcessChange                                                       */
 /*    desc: change on device high low settings for sensor from smartphone */
 /**************************************************************************/
-String processChange(String type, String deviceLevel, float value){
+int processChange(String type, String deviceLevel, float value){
    if (type.equals("S")){
      if (deviceLevel.equals("TH")){
        TH = value;
@@ -409,10 +445,10 @@ String processChange(String type, String deviceLevel, float value){
     }else if(deviceLevel.equals("S")){
       active = value;
     }else {
-      return "S_FAIL";
+      return S_FAIL;
     }
    }
-   return "S_OK";
+   return S_OK;
 }
 /**************************************************************************
  * processActionReceived 
@@ -429,26 +465,32 @@ void execPauseActuators(){
  **************************************************************************/
 void execRLActuators(int action){
 if (action == 0){
+      alertCd = "A";
       activationCd =0;
       updateActuatorState(activationCd);
       
 }else if (action == 1){
-      activationCd =11;
+      alertCd = "Z";
+      activationCd =13;
       updateActuatorState(activationCd);
   
 }else if (action ==2){
+      alertCd = "E";
       activationCd =4;
       updateActuatorState(activationCd);
       
 }else if (action == 3){
+      alertCd = "E";
       activationCd =5;
       updateActuatorState(activationCd);
       
 }else if (action == 4){
+      alertCd = "C";
       activationCd =2;
       updateActuatorState(activationCd);
       
 }else if (action == 5){
+      alertCd = "B";
       activationCd =1;
       updateActuatorState(activationCd);
   
@@ -570,7 +612,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","F","F","F","F");
+      updateActuatorDisplay(OFF,OFF,OFF,OFF,OFF);
       break;
     case 1:
       digitalWrite(HEATERPIN, LOW);
@@ -578,7 +620,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("O","F","F","F","F");
+      updateActuatorDisplay(ON,OFF,OFF,OFF,OFF);
       break;
     case 2:
       digitalWrite(HEATERPIN, HIGH);
@@ -586,7 +628,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);    
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","O","F","F","F");
+      updateActuatorDisplay(OFF,ON,OFF,OFF,OFF);
       break;
     case 3:
       digitalWrite(HEATERPIN, LOW);
@@ -594,7 +636,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);     
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("O","O","F","F","F");
+      updateActuatorDisplay(ON,ON,OFF,OFF,OFF);
       break;
     case 4:
       digitalWrite(HEATERPIN, HIGH);
@@ -602,7 +644,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);
       digitalWrite(COOLERFAN, LOW);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","F","F","O","F");
+      updateActuatorDisplay(OFF,OFF,OFF,ON,OFF);
       break;
     case 5:
       digitalWrite(HEATERPIN, HIGH);
@@ -610,7 +652,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);      
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","F","O","F","F");
+      updateActuatorDisplay(OFF,OFF,ON,OFF,OFF);
       break;
     case 6:
       digitalWrite(HEATERPIN, HIGH);
@@ -618,7 +660,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW); 
       digitalWrite(COOLERFAN, LOW);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","F","O","O","F");
+      updateActuatorDisplay(OFF,OFF,ON,ON,OFF);
       break;
     case 7:
       digitalWrite(HEATERPIN, HIGH);
@@ -626,7 +668,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);  
       digitalWrite(COOLERFAN, LOW);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","O","O","O","F");
+      updateActuatorDisplay(OFF,ON,ON,ON,OFF);
       break;
 
     case 8:
@@ -635,7 +677,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);      
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("O","O","O","F","F");
+      updateActuatorDisplay(ON,ON,ON,OFF,OFF);
       break;  
 
     case 9:
@@ -644,7 +686,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);     
       digitalWrite(COOLERFAN, LOW);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","O","F","O","F");
+      updateActuatorDisplay(OFF,ON,OFF,ON,OFF);
       break;   
 
     case 10:
@@ -653,7 +695,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);      
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("F","O","O","F","F");
+      updateActuatorDisplay(OFF,ON,ON,OFF,OFF);
       break; 
         
    case 11:
@@ -662,7 +704,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);      
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, HIGH);
-      updateActuatorDisplay("O","F","O","F","F");
+      updateActuatorDisplay(ON,OFF,ON,OFF,OFF);
       break;   
 
    case 12:
@@ -671,7 +713,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);     
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, LOW);
-      updateActuatorDisplay("O","F","F","F","O");
+      updateActuatorDisplay(ON,OFF,OFF,OFF,ON);
       break;   
 
    case 13:
@@ -680,7 +722,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);       
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, LOW);
-      updateActuatorDisplay("F","F","F","F","O");
+      updateActuatorDisplay(OFF,OFF,OFF,OFF,ON);
       break;   
 
    case 14:
@@ -689,7 +731,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, HIGH);      
       digitalWrite(COOLERFAN, LOW);
       digitalWrite(DEHUMIDIFIERPIN, LOW);
-      updateActuatorDisplay("F","F","F","O","O");
+      updateActuatorDisplay(OFF,OFF,OFF,ON,ON);
       break;   
 
    case 15:
@@ -698,7 +740,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);      
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, LOW);
-      updateActuatorDisplay("F","F","O","F","O");
+      updateActuatorDisplay(OFF,OFF,ON,OFF,ON);
       break;   
 
    case 16:
@@ -707,7 +749,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);     
       digitalWrite(COOLERFAN, HIGH);
       digitalWrite(DEHUMIDIFIERPIN, LOW);
-      updateActuatorDisplay("O","F","O","F","O");
+      updateActuatorDisplay(ON,OFF,ON,OFF,ON);
       break;
 
    case 17:
@@ -716,7 +758,7 @@ void updateActuatorState(int activationCd) {
       digitalWrite(AIRPURIFIERPIN, LOW);     
       digitalWrite(COOLERFAN, LOW);
       digitalWrite(DEHUMIDIFIERPIN, LOW);
-      updateActuatorDisplay("F","F","O","O","O");
+      updateActuatorDisplay(OFF,OFF,ON,ON,ON);
       break;   
     default:;
   }
@@ -761,32 +803,34 @@ String getSensorStatus(float temperature, float humidity, float airppm) {
   return ss;
 }
 
-void updateTriaStatusDisplay(String operationModeCd){
+void updateTriaStatusDisplay(int operationModeCd){
   const int BUF_MAX = 22;
   char buf[BUF_MAX];
 
   strcpy_P(buf, (const char*) F("TRIA |Mode "));
   
-  if(operationModeCd.equals("L")){
+  if(operationModeCd == LOGICAL){
      strcat_P(buf, (const char*)F("Logical..")); 
-  } else if (operationModeCd.equals("R")){
+     
+  } else if (operationModeCd == REINFORCE){
     strcat_P(buf, (const char*) F("Reinforce")); 
+    
   } else {
     strcat_P(buf, (const char*) F("Paused...")); 
   }
   ssd1306_printFixed (0, 0, buf, STYLE_NORMAL);
 }
 
-void updateSensorDisplay(String type, float value, float lo, float hi){
+void updateSensorDisplay(int type, float value, float lo, float hi){
   
   const int BUF_MAX = 22;
   char buf[BUF_MAX];
   const int VAL_MAX = 4;
   char val[VAL_MAX];
   
-  if (type.equals("T")) {
+  if (type == TM) {
   strcpy_P(buf, (const char*) F("T:"));
-  } else if (type.equals("H")){
+  } else if (type == HU){
     strcpy_P(buf, (const char*) F("H:"));
   } else{
     strcpy_P(buf, (const char*) F("A:"));
@@ -804,11 +848,11 @@ void updateSensorDisplay(String type, float value, float lo, float hi){
   strcat(buf, val);
   //strcat_P(buf, (const char*) F("] F"));  
  
-  if (type.equals("T")){   
+  if (type == TM){   
      strcat_P(buf, (const char*) F("] F")); 
      ssd1306_printFixed (0, 16,buf, STYLE_NORMAL);
      
-  } else if (type.equals("H")){
+  } else if (type == HU){
     strcat_P(buf, (const char*) F("] rH")); 
     ssd1306_printFixed (0, 24,buf, STYLE_NORMAL);
 
@@ -819,18 +863,18 @@ void updateSensorDisplay(String type, float value, float lo, float hi){
   }
 }
 
-void updateActuatorDisplay(String Ht, String Fn, String Hu, String Ap, String Dh ){
-  log(Ht+':'+Fn+':'+Hu+':'+Ap+':'+Dh, "INFO");
-  if (Ht.equals("O")) {ssd1306_fillRect(10,55, 20,60);} else { ssd1306_drawRect(10,55, 20,60); }
-  if (Fn.equals("O")) {ssd1306_fillRect(35,55, 45,60);} else {ssd1306_drawRect(35,55, 45,60);}
-  if (Hu.equals("O")) {ssd1306_fillRect(60,55, 70,60);} else {ssd1306_drawRect(60,55, 70,60);}
-  if (Ap.equals("O")) {ssd1306_fillRect(85,55, 95,60);} else {ssd1306_drawRect(85,55, 95,60);}
-  if (Dh.equals("O")) {ssd1306_fillRect(110,55, 120,60);} else {ssd1306_drawRect(110,55, 120,60);}
+void updateActuatorDisplay(int Ht, int Fn, int Hu, int Ap, int Dh ){
+  log(String(Ht) +':'+String(Fn)+':'+String(Hu)+':'+String(Ap)+':'+String(Dh), INFO);
+  if (Ht == ON) {ssd1306_fillRect(10,55, 20,60);} else { ssd1306_drawRect(10,55, 20,60); }
+  if (Fn == ON) {ssd1306_fillRect(35,55, 45,60);} else {ssd1306_drawRect(35,55, 45,60);}
+  if (Hu == ON) {ssd1306_fillRect(60,55, 70,60);} else {ssd1306_drawRect(60,55, 70,60);}
+  if (Ap == ON) {ssd1306_fillRect(85,55, 95,60);} else {ssd1306_drawRect(85,55, 95,60);}
+  if (Dh == ON) {ssd1306_fillRect(110,55, 120,60);} else {ssd1306_drawRect(110,55, 120,60);}
 }
 
-void log(String sMsg, String type ){
-  if (logLevel.equals(type)){
-     String dMsg = ">" + type +" : " + sMsg;
+void log(String sMsg, int type ){
+  if (logLevel == type){
+     String dMsg = ">" + String(type) +" : " + sMsg;
      Serial.println(dMsg);
   }
 }
